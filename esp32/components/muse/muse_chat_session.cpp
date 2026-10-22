@@ -376,7 +376,9 @@ static bool read_all(esp_tls_t *tls, uint8_t *buf, size_t len)
     return true;
 }
 
-static bool ws_send_binary(esp_tls_t *tls, const uint8_t *payload, size_t len)
+/* Payload is the connection's disposable send buffer. Mask it in place so
+ * each body leaves in one TLS stream rather than hundreds of 512-byte records. */
+static bool ws_send_binary(esp_tls_t *tls, uint8_t *payload, size_t len)
 {
     uint8_t hdr[14];
     size_t hl;
@@ -403,18 +405,10 @@ static bool ws_send_binary(esp_tls_t *tls, const uint8_t *payload, size_t len)
         return false;
     }
     const uint8_t *mk = reinterpret_cast<const uint8_t *>(&key);
-    uint8_t chunk[512];
-    for (size_t off = 0; off < len;) {
-        size_t n = len - off < sizeof(chunk) ? len - off : sizeof(chunk);
-        for (size_t i = 0; i < n; i++) {
-            chunk[i] = payload[off + i] ^ mk[(off + i) & 3];
-        }
-        if (!write_all(tls, chunk, n)) {
-            return false;
-        }
-        off += n;
+    for (size_t i = 0; i < len; i++) {
+        payload[i] ^= mk[i & 3];
     }
-    return true;
+    return !len || write_all(tls, payload, len);
 }
 
 static bool ws_send_ping(esp_tls_t *tls)

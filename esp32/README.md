@@ -280,6 +280,8 @@ The StopWatch profile enables optional AI-generated Chinese speech using
 OpenAI Realtime (`gpt-realtime-2.1-mini`). It reads completed Muse replies
 through the device speaker, with text fallback if the service is unavailable.
 The device connects directly; the computer can be unplugged after setup.
+Quiet synthesized speech receives up to 9.5 dB of gain, with peak protection;
+the speaker volume setting still controls listening level.
 Provision the API key from a local, ignored env file (never paste it into a
 command or commit it):
 

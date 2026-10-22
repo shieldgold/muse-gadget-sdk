@@ -166,3 +166,76 @@ int main(int argc, char **argv) {
 
     def test_rejection_capacity_preserves_correlation(self):
         self.run_case(2)
+
+
+class ChatUploadFrames(unittest.TestCase):
+    def test_large_upload_frames_are_masked_and_written_without_tiny_tls_records(self):
+        source = (ROOT / "components/muse/muse_chat_session.cpp").read_text()
+        function = source[
+            source.index("static bool ws_send_binary(") : source.index(
+                "static bool ws_send_ping("
+            )
+        ]
+        code = (
+            r"""
+#include <cassert>
+#include <cstdint>
+#include <cstring>
+#include <vector>
+using esp_tls_t = int;
+static std::vector<uint8_t> wire;
+static int writes;
+static uint32_t esp_random() { return 0x12345678; }
+static bool write_all(esp_tls_t *, const void *data, size_t n) {
+    writes++;
+    const auto *p = static_cast<const uint8_t *>(data);
+    wire.insert(wire.end(), p, p + n);
+    return true;
+}
+"""
+            + function
+            + r"""
+int main() {
+    for (size_t size : {0u, 1u, 125u, 126u, 16384u, 65536u}) {
+        std::vector<uint8_t> payload(size);
+        for (size_t i = 0; i < size; i++) payload[i] = (uint8_t)(i * 17);
+        auto original = payload;
+        wire.clear(); writes = 0;
+        assert(ws_send_binary(nullptr, payload.data(), size));
+        assert(writes <= 2);  // one header and one bounded TLS stream
+        assert(wire[0] == 0x82 && (wire[1] & 0x80));
+        size_t header = size < 126 ? 2 : size <= 65535 ? 4 : 10;
+        size_t length = wire[1] & 127;
+        if (length == 126) length = (wire[2] << 8) | wire[3];
+        else if (length == 127) {
+            length = 0;
+            for (int i = 0; i < 8; i++) length = (length << 8) | wire[2+i];
+        }
+        assert(length == size && wire.size() == header + 4 + size);
+        for (size_t i = 0; i < size; i++)
+            assert((wire[header+4+i] ^ wire[header+(i & 3)]) == original[i]);
+    }
+}
+"""
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "upload.cpp"
+            path.write_text(code)
+            binary = Path(tmp) / "upload"
+            built = subprocess.run(
+                [
+                    "c++",
+                    "-std=c++17",
+                    "-Wall",
+                    "-Wextra",
+                    "-Werror",
+                    str(path),
+                    "-o",
+                    str(binary),
+                ],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(built.returncode, 0, built.stderr)
+            ran = subprocess.run([str(binary)], capture_output=True, text=True)
+            self.assertEqual(ran.returncode, 0, ran.stderr)

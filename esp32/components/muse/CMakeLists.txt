@@ -147,7 +147,7 @@ set(muse_priv_requires
     # before Kconfig values exist, so these can't depend on it; only the code does.
     fatfs esp_driver_sdspi sdmmc)
 if(CONFIG_MUSE_CLOUD_TTS)
-    list(APPEND srcs "muse_tts.cpp" "muse_tts_protocol.c")
+        list(APPEND srcs "muse_tts.cpp" "muse_tts_protocol.c" "muse_tts_audio.c")
 endif()
 list(APPEND muse_priv_requires tcp_transport)
 list(APPEND muse_priv_requires camera)

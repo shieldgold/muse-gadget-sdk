@@ -16,6 +16,7 @@
 
 #include "muse_tts.h"
 #include "muse_tts_protocol.h"
+#include "muse_tts_audio.h"
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
@@ -61,6 +62,7 @@ static void worker(void *)
 {
     bool ok = false;
     size_t bytes = 0;
+    float gain = 3.0f;
     char *rx = (char *)external(MUSE_TTS_EVENT_MAX + 1);
     uint8_t *pcm = (uint8_t *)external(MUSE_TTS_EVENT_MAX);
     char auth[MUSE_TTS_KEY_MAX + 16];
@@ -102,6 +104,7 @@ static void worker(void *)
                     if (event < 0) { ESP_LOGW(TAG, "service returned invalid audio or an error"); break; }
                     if (event == 2) { ok = bytes > 0; break; }
                     if (event == 1) {
+                        muse_tts_boost((int16_t *)pcm, count / sizeof(int16_t), &gain);
                         size_t offset = 0;
                         while (offset < count && active(deadline)) {
                             offset += xStreamBufferSend(s_audio, pcm + offset, count - offset, pdMS_TO_TICKS(50));
