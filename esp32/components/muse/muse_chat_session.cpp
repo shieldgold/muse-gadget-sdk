@@ -72,6 +72,9 @@ extern "C" {
 #include "muse_wifi.h"
 }
 #include "muse_chat_priv.h"
+#if CONFIG_MUSE_CLOUD_TTS
+#include "muse_tts.h"
+#endif
 
 #include <xplat/noise/core/ClientSession.h>
 #include <xplat/noise/core/PsaCryptoBackend.h>
@@ -244,6 +247,7 @@ struct turn_t {
     /* TTS */
     int tts_msg;             /* message being fetched (or shown, speaker off), or -1 */
     bool silent;             /* speaker off: tts_msg is paced by silence, not fetched */
+    bool cloud_tts;          /* PCM24 from the independent synthesis task */
     uint8_t *mp3;            /* MP3_BUF */
     size_t mp3_len;
     bool mp3_ended;
@@ -949,6 +953,9 @@ static size_t resample(resampler_t *r, const int16_t *in, size_t n, int16_t *out
 
 static void turn_reset_streams(void)
 {
+#if CONFIG_MUSE_CLOUD_TTS
+    muse_tts_cancel(s_turn.gen);
+#endif
     send_reset(s_turn.dict_id);
     send_reset(s_turn.chat_id);
     for (auto &s : s_streams) {
@@ -965,6 +972,7 @@ static void turn_finish(void)
     s_turn.dict_id = s_turn.chat_id = 0;
     s_turn.tts_msg = -1;
     s_turn.silent = false;
+    s_turn.cloud_tts = false;
     s_turn.mp3_len = 0;
 }
 
@@ -1538,6 +1546,17 @@ static void start_tts(void)
         m.tts = TTS_ACTIVE;
         s_turn.tts_msg = i;
         s_turn.silent = true;
+#if CONFIG_MUSE_CLOUD_TTS
+        if (muse_settings_speaker_on() && s_turn.texts &&
+            muse_tts_start(s_turn.texts + i * TEXT_MAX, s_turn.gen)) {
+            s_turn.silent = false;
+            s_turn.cloud_tts = true;
+            m.pcm_frames = 0;
+            resampler_init(&s_turn.down, 24000, MIC_RATE);
+            mark(M_TTS);
+            ESP_LOGI(TAG, "AI-generated Chinese speech started");
+        }
+#endif
         ESP_LOGI(TAG, "showing message %s (%u chars)", m.id, (unsigned)m.len);
         show_reply_start(m);
         return;
@@ -1598,6 +1617,36 @@ static void decode(void)
         pace_silently();
         return;
     }
+#if CONFIG_MUSE_CLOUD_TTS
+    if (s_turn.cloud_tts) {
+        if (xStreamBufferSpacesAvailable(s_out) < 2048) return;
+        bool done, failed;
+        size_t bytes = muse_tts_read(s_turn.gen, s_pcm, 2048, &done, &failed);
+        if (bytes) {
+            size_t samples = resample(&s_turn.down, s_pcm, bytes / 2, s_pcm16);
+            if (s_turn.gen == s_gen.load()) {
+                mark(M_AUDIO);
+                xStreamBufferSend(s_out, s_pcm16, samples * sizeof(int16_t), 0);
+            }
+            s_turn.pcm_out += samples;
+        }
+        if (done) {
+            msg_t &m = s_turn.msgs[s_turn.tts_msg];
+            s_turn.cloud_tts = false;
+            if (failed) {
+                ESP_LOGW(TAG, "speech unavailable; preserving text reply");
+                s_turn.silent = true;
+                m.pcm_start = s_turn.pcm_out;
+                m.pcm_frames = (uint32_t)(m.len * MIC_RATE / TEXT_CHARS_PER_S);
+            } else {
+                m.pcm_frames = s_turn.pcm_out - m.pcm_start;
+                m.tts = TTS_FINISHED;
+                s_turn.tts_msg = -1;
+            }
+        }
+        return;
+    }
+#endif
     /*
      * minimp3 only takes a frame once it can see the next one's header. Given
      * less, it resets and says to skip all of it, which drops speech and clicks.
@@ -2044,6 +2093,9 @@ extern "C" void muse_hatch_start(void)
     }
     cJSON_Hooks hooks = { json_alloc, heap_caps_free };
     cJSON_InitHooks(&hooks);
+#if CONFIG_MUSE_CLOUD_TTS
+    muse_tts_init();
+#endif
     /* Keep the command/event queues out of internal DRAM, which Wi-Fi, BLE and
      * mbedTLS can exhaust: when the allocation failed here hatch_task never
      * started and every turn was silently dropped. Fall back to internal RAM
@@ -2279,3 +2331,39 @@ extern "C" size_t muse_hatch_mp3_selftest(int16_t **pcm_out)
     *pcm_out = st.pcm;
     return st.n;
 }
+
+#if CONFIG_MUSE_CLOUD_TTS
+extern "C" size_t muse_tts_selftest(int16_t **pcm_out)
+{
+    *pcm_out = nullptr;
+    constexpr uint32_t generation = UINT32_MAX;
+    constexpr size_t capacity = MIC_RATE * 30;
+    int16_t *out = (int16_t *)psram_alloc(capacity * sizeof(int16_t));
+    int16_t *input = (int16_t *)psram_alloc(2048);
+    int16_t *scratch = (int16_t *)psram_alloc(2048);
+    bool success = false;
+    size_t count = 0;
+    if (out && input && scratch && muse_tts_start("你好，Muse 中文语音已经连接。这是人工智能合成的声音。", generation)) {
+        resampler_t resampler;
+        resampler_init(&resampler, 24000, MIC_RATE);
+        int64_t deadline = now_us() + 40 * 1000000LL;
+        while (now_us() < deadline && count + 1024 < capacity) {
+            bool done, failed;
+            size_t bytes = muse_tts_read(generation, input, 2048, &done, &failed);
+            if (bytes) {
+                size_t samples = resample(&resampler, input, bytes / 2, scratch);
+                memcpy(out + count, scratch, samples * sizeof(int16_t));
+                count += samples;
+            }
+            if (done) { success = !failed && count > 0; break; }
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
+        muse_tts_cancel(generation);
+    }
+    free(input); free(scratch);
+    ESP_LOGI(TAG, "cloud speech self-test: %s, %u samples", success ? "ready" : "failed", (unsigned)count);
+    if (!success) { free(out); return 0; }
+    *pcm_out = out;
+    return count;
+}
+#endif

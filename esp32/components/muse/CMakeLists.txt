@@ -146,6 +146,10 @@ set(muse_priv_requires
     # The Sticky's microSD (CONFIG_MUSE_STICKY_SD). Requirements are resolved
     # before Kconfig values exist, so these can't depend on it; only the code does.
     fatfs esp_driver_sdspi sdmmc)
+if(CONFIG_MUSE_CLOUD_TTS)
+    list(APPEND srcs "muse_tts.cpp" "muse_tts_protocol.c")
+endif()
+list(APPEND muse_priv_requires tcp_transport)
 list(APPEND muse_priv_requires camera)
 
 idf_component_register(

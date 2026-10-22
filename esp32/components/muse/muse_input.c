@@ -45,6 +45,9 @@
 #include "muse_ui.h"
 #include "muse_voice.h"
 #include "muse_wifi.h"
+#if CONFIG_MUSE_CLOUD_TTS
+#include "muse_tts.h"
+#endif
 #if CONFIG_MUSE_VIDEO
 #include "muse_video.h"
 #endif
@@ -711,6 +714,29 @@ static void set_face(const char *name)
  */
 static bool console_command(char *line, bool whole)
 {
+#if CONFIG_MUSE_CLOUD_TTS
+    if (!strncmp(line, "tts_key=", 8)) {
+        bool ok = whole && muse_tts_set_key(line + 8);
+        /* This line contains a credential: don't echo it or pass it to BLE. */
+        memset(line, 0, strlen(line));
+        printf("@tts_key %s\n", ok ? "ok" : "error");
+        fflush(stdout);
+        return true;
+    }
+    if (!strcmp(line, "tts.status")) {
+        printf("@tts_status {\"ready\":%s,\"configured\":%s,\"busy\":%s,\"wifi\":%s,\"ai_generated\":true}\n",
+               muse_tts_ready() ? "true" : "false", muse_tts_configured() ? "true" : "false",
+               muse_tts_busy() ? "true" : "false", muse_wifi_connected() ? "true" : "false");
+        fflush(stdout);
+        return true;
+    }
+    if (!strcmp(line, "tts.test")) {
+        muse_voice_request_ttstest();
+        printf("@tts_test queued\n");
+        fflush(stdout);
+        return true;
+    }
+#endif
     if (whole && s_console_hook && s_console_hook(line)) {
         return true;
     }

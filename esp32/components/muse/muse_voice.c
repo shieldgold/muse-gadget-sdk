@@ -73,6 +73,9 @@ static volatile float s_monitor_db = -100.0f;
 static volatile bool s_chirp;
 static volatile bool s_loopback;
 static volatile bool s_mp3test;
+#if CONFIG_MUSE_CLOUD_TTS
+static volatile bool s_ttstest;
+#endif
 
 /*
  * Pre-roll: while idle the mic keeps running into this ring, so a recording
@@ -838,6 +841,23 @@ static void voice_task(void *arg)
                 free(pcm);
                 pre_reset();
             }
+#if CONFIG_MUSE_CLOUD_TTS
+            if (s_ttstest) {
+                s_ttstest = false;
+                int16_t *pcm = NULL;
+                size_t n = muse_tts_selftest(&pcm);
+                bool played = n > 0 && muse_settings_speaker_on();
+                for (size_t i = 0; i < n; i += MUSE_AUDIO_CHUNK) {
+                    if (muse_audio_write(pcm + i, n - i < MUSE_AUDIO_CHUNK ? n - i : MUSE_AUDIO_CHUNK) != ESP_OK) {
+                        played = false;
+                        break;
+                    }
+                }
+                ESP_LOGI(TAG, "cloud speech playback: %s (%u frames)", played ? "complete" : "failed", (unsigned)n);
+                free(pcm);
+                pre_reset();
+            }
+#endif
             if (s_loopback) {
                 s_loopback = false;
                 muse_audio_loopback_test(muse_settings_volume());
@@ -936,6 +956,13 @@ void muse_voice_request_mp3test(void)
 {
     s_mp3test = true;
     muse_state_nudge();
+}
+
+void muse_voice_request_ttstest(void)
+{
+#if CONFIG_MUSE_CLOUD_TTS
+    s_ttstest = true;
+#endif
 }
 
 bool muse_voice_resting(void)

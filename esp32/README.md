@@ -276,7 +276,27 @@ To work on the UI without a board, use the
 and avatar renderer in a 412 x 412 SenseCAP Watcher window, supports mouse and
 keyboard input, and can render scripted screenshots without a display server.
 
-Replies from Muse are text: push-to-talk sends your voice note, Muse
+The StopWatch profile enables optional AI-generated Chinese speech using
+OpenAI Realtime (`gpt-realtime-2.1-mini`). It reads completed Muse replies
+through the device speaker, with text fallback if the service is unavailable.
+The device connects directly; the computer can be unplugged after setup.
+Provision the API key from a local, ignored env file (never paste it into a
+command or commit it):
+
+```sh
+python3 tools/muse/configure_tts.py --port PORT --env-file /absolute/path/to/.env.local --test
+```
+
+The file contains `OPENAI_API_KEY`. The key is saved only to the gadget's NVS;
+its value is never returned by `>tts.status` or logged. `>tts_key=` clears it.
+Speaker off uses captions without requesting speech. A new talk press cancels
+old audio. The API receives the reply text for synthesis and uses the API
+account's quota. The spoken voice is AI generated. This is independent of
+the Muse SDK token. Other board profiles can opt in with
+`CONFIG_MUSE_CLOUD_TTS=y` if they have PSRAM and a speaker.
+
+On profiles without cloud speech configured, replies from Muse are text:
+push-to-talk sends your voice note, Muse
 transcribes it and answers in writing, and boards with a screen show the
 answer as captions (Voice PE and reSpeaker Lite replies show up in the Muse app). Two
 things you can change:

@@ -112,6 +112,7 @@ size_t muse_hatch_turn_read(int16_t *pcm, size_t frames, int wait_ms);
 
 /* Bench test: decodes a built-in MP3 to 16 kHz; caller frees *pcm. Returns frames. */
 size_t muse_hatch_mp3_selftest(int16_t **pcm);
+size_t muse_tts_selftest(int16_t **pcm);
 
 /*
  * As muse_hatch_turn_audio, for a note recorded before the turn began: takes

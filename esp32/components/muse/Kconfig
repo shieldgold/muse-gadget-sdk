@@ -255,6 +255,17 @@ menu "Muse"
             them. Needs PSRAM. Without it, voice notes go over Home Link's own
             session to its paired VM and replies are shown as text.
 
+    config MUSE_CLOUD_TTS
+        bool "Cloud Chinese speech for Muse replies"
+        depends on MUSE_HATCH && SPIRAM
+        select MBEDTLS_CERTIFICATE_BUNDLE
+        select MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY
+        default n
+        help
+            Reads completed replies using OpenAI Realtime and the speaker.
+            Provision an API key over USB, stored in NVS, never in the build.
+            Speech is AI generated. Failures fall back to text captions.
+
     config MUSE_HATCH_COMPACT_BUFFERS
         bool "Smaller voice session buffers, for 2 MB of PSRAM"
         depends on MUSE_HATCH
